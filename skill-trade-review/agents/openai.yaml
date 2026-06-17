@@ -1,0 +1,7 @@
+skill: trade-review
+entry: SKILL.md
+language: zh-CN
+notes:
+  - Follow the local trade review workflow.
+  - Keep outputs structured and auditable.
+

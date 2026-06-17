@@ -1,0 +1,11 @@
+GNU GENERAL PUBLIC LICENSE
+Version 3, 29 June 2007
+
+Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+Everyone is permitted to copy and distribute verbatim copies
+of this license document, but changing it is not allowed.
+
+This repository follows GPL-3.0-only for consistency with the upstream QuantSkills
+skill framework style. If you need the full canonical license text for redistribution,
+replace this file with the standard GPL-3.0 text before publishing externally.
+

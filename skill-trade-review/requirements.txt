@@ -1,0 +1,6 @@
+pandas
+numpy
+requests
+pyarrow
+anthropic>=0.40.0
+

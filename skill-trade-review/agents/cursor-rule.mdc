@@ -1,0 +1,8 @@
+# Trade Review Agent Rule
+
+- Read `SKILL.md` before using this skill.
+- Prefer `scripts/review.py` as the main entrypoint.
+- Run `python scripts/test.py` before claiming the skill is ready.
+- Do not rewrite realized PnL from raw fills.
+- Keep market-context fetching on the official path for formal use.
+
