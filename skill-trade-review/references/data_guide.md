@@ -11,15 +11,15 @@
 ## 环境变量
 
 ```bash
-set PANDA_DATA_USERNAME=8613148739672
-set PANDA_DATA_PASSWORD=********
+set PANDA_DATA_USERNAME= 
+set PANDA_DATA_PASSWORD= 
 ```
 
 可选，控制 LLM 层：
 
 ```bash
-set ANTHROPIC_BASE_URL=https://llmx.tqx.ai
-set ANTHROPIC_API_KEY=sk-...
+set ANTHROPIC_BASE_URL= 
+set ANTHROPIC_API_KEY= 
 set REVIEW_LLM_DISABLED=1     # 等同 config.llm.enabled=False
 ```
 

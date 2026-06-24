@@ -3,7 +3,7 @@
 硬性原则:
 1. LLM 不接触原始 trades 字段，只看 summary/attribution/patterns/market_review/trade_reviews 摘要。
 2. 输出永远不回流去修改任何数值字段。
-3. 默认走 opus-4-7 (走 llmx.tqx.ai 网关)。
+3. 默认走 opus-4-7 (走   网关)。
 4. 单次复盘 LLM 调用 ≤6 次，输入 ≤8000 chars/次，输出 ≤1500 tokens/次。
 5. 失败立即降级 None，不重试。
 6. 缓存：每段独立 cache key，24h 内同输入命中。

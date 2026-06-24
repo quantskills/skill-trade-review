@@ -28,6 +28,61 @@ BUILD_ID = "R00"
 BUILD_NAME = "交易复盘"
 
 
+# --- preflight ---------------------------------------------------
+
+def _filled(value: Any) -> bool:
+    return value is not None and str(value).strip() != ""
+
+
+def _llm_enabled(config: dict) -> bool:
+    cfg = config.get("llm", {})
+    env_disabled = os.getenv("REVIEW_LLM_DISABLED") == "1"
+    return bool(cfg.get("enabled", True)) and not env_disabled
+
+
+def _preflight_credentials(config: dict, context: Any = None) -> None:
+    """在正式运行前检查外部服务凭据，避免静默降级。"""
+    missing: list[str] = []
+
+    if _llm_enabled(config):
+        llm_cfg = config.get("llm", {})
+        if not _filled(llm_cfg.get("base_url") or os.getenv("ANTHROPIC_BASE_URL")):
+            missing.append("ANTHROPIC_BASE_URL")
+        if not _filled(llm_cfg.get("api_key") or os.getenv("ANTHROPIC_API_KEY")):
+            missing.append("ANTHROPIC_API_KEY")
+
+    needs_panda = (
+        context is None
+        and not config.get("disable_context_fetch")
+        and not config.get("disable_panda_lookup")
+        and config.get("fetch_mark_price") is None
+    )
+    if needs_panda:
+        panda_cfg = config.get("panda_data", {})
+        if not _filled(panda_cfg.get("username") or os.getenv("PANDA_DATA_USERNAME")):
+            missing.append("PANDA_DATA_USERNAME")
+        if not _filled(panda_cfg.get("password") or os.getenv("PANDA_DATA_PASSWORD")):
+            missing.append("PANDA_DATA_PASSWORD")
+
+    if not missing:
+        return
+
+    uniq = list(dict.fromkeys(missing))
+    lines = [
+        "运行前配置缺失，请先配置以下环境变量或在 config 中传入对应字段：",
+        *[f"- {name}" for name in uniq],
+        "",
+        "环境变量示例：",
+        "set ANTHROPIC_BASE_URL= ",
+        "set ANTHROPIC_API_KEY= ",
+        "set PANDA_DATA_USERNAME= ",
+        "set PANDA_DATA_PASSWORD= ",
+        "",
+        "如需调试跳过外部依赖，可设置 config={'llm': {'enabled': False}, 'disable_context_fetch': True, 'disable_panda_lookup': True}，或 CLI 使用 --no-llm --no-context。",
+    ]
+    raise EnvironmentError("\n".join(lines))
+
+
 # --- 评级 ---------------------------------------------------------
 
 def _rate(score: float, n_closed: int) -> tuple[str, list[str]]:
@@ -458,6 +513,7 @@ def run(
     config: dict | None = None,
 ) -> pd.DataFrame:
     config = config or {}
+    _preflight_credentials(config, context)
     update_time = config.get("update_time", datetime.now().isoformat(timespec="seconds"))
     data_version = config.get("data_version", "real-v1")
     include_open_wr = bool(config.get("include_open_in_winrate", False))
@@ -475,9 +531,10 @@ def run(
 
     # 注入 mark_price 拉取器（默认用 panda_data；上游可在 config 提供自定义）
     mark_fetcher = config.get("fetch_mark_price")
+    panda_credentials = config.get("panda_data") or {}
     if mark_fetcher is None and not config.get("disable_panda_lookup"):
         try:
-            mark_fetcher = make_mark_price_fetcher()
+            mark_fetcher = make_mark_price_fetcher(panda_credentials)
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"mark_price fetcher 初始化失败: {exc}")
             mark_fetcher = None
@@ -490,7 +547,7 @@ def run(
             context = {"stock": None, "futures": {}, "regime_label": None, "fetch_failures": ["context fetch disabled"]}
         else:
             try:
-                context = load_context(df, period)
+                context = load_context(df, period, panda_credentials)
             except Exception as exc:  # noqa: BLE001
                 context = {"stock": None, "futures": {}, "regime_label": None, "fetch_failures": [f"load_context 异常: {exc}"]}
     if context.get("fetch_failures"):
@@ -662,7 +719,12 @@ def _cli():
     config = {"llm": {"enabled": not args.no_llm}}
     if args.no_context:
         config["disable_context_fetch"] = True
-    out = run(trades, mode=args.mode, period=period, config=config)
+    try:
+        out = run(trades, mode=args.mode, period=period, config=config)
+    except EnvironmentError as exc:
+        sys.stderr.reconfigure(encoding="utf-8")
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2)
     if args.out:
         out.to_parquet(args.out)
         print(f"saved to {args.out}, rows={len(out)}")

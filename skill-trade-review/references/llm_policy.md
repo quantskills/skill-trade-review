@@ -7,7 +7,7 @@
 ## 默认行为
 
 - 默认状态：**开启**（opus-4-7）
-- 默认模型：`opus-4-7`（对接 `llmx.tqx.ai` 网关的别名；该网关 distributor 内可用）
+- 默认模型：`opus-4-7`（对接 ` ` 网关的别名；该网关 distributor 内可用）
 - 走当前会话的 `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` 环境变量
 - 调用层可在 `config.llm` 显式覆盖
 
@@ -16,8 +16,8 @@ config = {
     "llm": {
         "enabled": True,
         "model": "opus-4-7",                    # 可切 sonnet-4-6 / haiku-4-6 / deepseek-r1
-        "base_url": "https://llmx.tqx.ai",        # 不传则用 ANTHROPIC_BASE_URL
-        "api_key": "sk-...",                       # 不传则用 ANTHROPIC_API_KEY
+        "base_url": " ",                         # 不传则用 ANTHROPIC_BASE_URL
+        "api_key": " ",                          # 不传则用 ANTHROPIC_API_KEY
     }
 }
 run(trades, config=config)

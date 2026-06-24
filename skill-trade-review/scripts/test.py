@@ -14,6 +14,66 @@ from review import run
 BASE_CFG = {"llm": {"enabled": False}, "disable_context_fetch": True}
 
 
+def test_preflight_requires_credentials_by_default() -> None:
+    old_env = {k: os.environ.get(k) for k in (
+        "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY",
+        "PANDA_DATA_USERNAME", "PANDA_DATA_PASSWORD",
+    )}
+    for key in old_env:
+        os.environ.pop(key, None)
+    trades = [
+        {"trade_date": "2026-06-04", "ts_code": "RB2610.SHFE", "direction": "long",
+         "status": "closed", "volume": 5, "realized_pnl": 1200.0},
+    ]
+    try:
+        try:
+            run(trades, mode="daily")
+        except EnvironmentError as exc:
+            msg = str(exc)
+            assert "ANTHROPIC_BASE_URL" in msg
+            assert "ANTHROPIC_API_KEY" in msg
+            assert "PANDA_DATA_USERNAME" in msg
+            assert "PANDA_DATA_PASSWORD" in msg
+            print("[OK] preflight_requires_credentials_by_default")
+            return
+        raise AssertionError("默认运行缺凭据时必须提示配置")
+    finally:
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_preflight_accepts_config_credentials() -> None:
+    old_env = {k: os.environ.get(k) for k in (
+        "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY",
+        "PANDA_DATA_USERNAME", "PANDA_DATA_PASSWORD",
+    )}
+    for key in old_env:
+        os.environ.pop(key, None)
+    trades = [
+        {"trade_date": "2026-06-04", "ts_code": "RB2610.SHFE", "direction": "long",
+         "status": "closed", "volume": 5, "realized_pnl": 1200.0},
+    ]
+    cfg = {
+        "llm": {"enabled": False, "base_url": " ", "api_key": " "},
+        "panda_data": {"username": " ", "password": " "},
+        "disable_context_fetch": True,
+    }
+    try:
+        out = run(trades, mode="daily", config=cfg)
+        parsed = json.loads(out["result_json"].iloc[0])
+        assert parsed["summary"]["n_closed"] == 1
+        print("[OK] preflight_accepts_config_credentials")
+    finally:
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def test_stock_only() -> None:
     trades = [
         {"trade_date": "2026-06-04", "ts_code": "000001.SZ", "direction": "long",
@@ -353,6 +413,8 @@ def test_strategy_review_disabled_when_no_path() -> None:
 
 
 if __name__ == "__main__":
+    test_preflight_requires_credentials_by_default()
+    test_preflight_accepts_config_credentials()
     test_stock_only()
     test_future_only()
     test_mixed()
