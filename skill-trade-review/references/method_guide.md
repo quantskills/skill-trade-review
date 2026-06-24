@@ -27,7 +27,7 @@ trades(list[dict])
 [7] generate_advice                模式 → 建议模板
     │
     ▼
-[8] call_llm                       LLM 产 narrative + insights（受限）
+[8] host_model_fill                宿主模型按原插槽回填 narrative / insights / 策略点评
     │
     ▼
 [9] _compute_score → _rate         评级 5 档

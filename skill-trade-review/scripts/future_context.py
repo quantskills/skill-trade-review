@@ -41,18 +41,37 @@ def load_future_context(variety: str, start_yyyymmdd: str, end_yyyymmdd: str) ->
     daily_start = _shift_yyyymmdd(start_yyyymmdd, -150)
     dom_df = None
     try:
-        dom = panda_data.get_future_dominant(symbol=[variety],
+        dom = panda_data.get_future_dominant(underlying_symbol=[variety],
                                              start_date=daily_start,
                                              end_date=end_yyyymmdd)
         if dom is not None and not dom.empty:
             dom = dom.sort_values("date").reset_index(drop=True)
-            dom_df = dom
             out["dominant_symbol"] = str(dom["symbol"].iloc[-1]) if "symbol" in dom.columns else None
-            if "close" in dom.columns:
-                out["dominant_close"] = float(dom["close"].iloc[-1])
-                out["dominant_pct_pct"] = _safe_pct_change(dom["close"])
-                out["volatility_5d"] = _annualized_vol(dom["close"].tail(6))
-                out["technical_daily"] = all_indicators(dom.tail(80))
+            if "symbol" in dom.columns:
+                symbols = dom["symbol"].dropna().astype(str).unique().tolist()
+                if symbols:
+                    px = panda_data.get_future_daily(
+                        symbol=symbols,
+                        start_date=daily_start,
+                        end_date=end_yyyymmdd,
+                    )
+                    if px is not None and not px.empty:
+                        merge_key = "date" if "date" in px.columns else ("trade_date" if "trade_date" in px.columns else None)
+                        symbol_key = "symbol" if "symbol" in px.columns else None
+                        if merge_key and symbol_key:
+                            dom_df = dom.merge(
+                                px,
+                                left_on=["date", "symbol"],
+                                right_on=[merge_key, symbol_key],
+                                how="left",
+                            )
+                            dom_df = dom_df.sort_values("date").reset_index(drop=True)
+            if dom_df is not None and "close" in dom_df.columns and dom_df["close"].notna().any():
+                dom_df = dom_df.dropna(subset=["close"]).reset_index(drop=True)
+                out["dominant_close"] = float(dom_df["close"].iloc[-1])
+                out["dominant_pct_pct"] = _safe_pct_change(dom_df["close"])
+                out["volatility_5d"] = _annualized_vol(dom_df["close"].tail(6))
+                out["technical_daily"] = all_indicators(dom_df.tail(80))
     except Exception as exc:  # noqa: BLE001
         out["_dominant_error"] = str(exc)
 
@@ -76,10 +95,11 @@ def load_future_context(variety: str, start_yyyymmdd: str, end_yyyymmdd: str) ->
     # --- 3. 最后一交易日 15min（仅给最后一日） ---
     try:
         last_day = end_yyyymmdd
-        m15 = panda_data.get_future_min(symbol=[out.get("dominant_symbol") or variety],
-                                        period="15",
+        minute_symbol = out.get("dominant_symbol") or f"{variety}_DOMINANT"
+        m15 = panda_data.get_future_min(symbol=[minute_symbol],
                                         start_date=last_day,
-                                        end_date=last_day)
+                                        end_date=last_day,
+                                        frequency="15m")
         if m15 is not None and not m15.empty:
             m15 = m15.sort_values(m15.columns[0]).reset_index(drop=True)
             out["technical_15min"] = all_indicators(m15.tail(20))
@@ -88,7 +108,7 @@ def load_future_context(variety: str, start_yyyymmdd: str, end_yyyymmdd: str) ->
 
     # --- 4. 基差 ---
     try:
-        basis = panda_data.get_future_basis(symbol=[variety],
+        basis = panda_data.get_future_basis(underlying_symbol=[variety],
                                             start_date=start_yyyymmdd,
                                             end_date=end_yyyymmdd)
         if basis is not None and not basis.empty:
@@ -101,7 +121,7 @@ def load_future_context(variety: str, start_yyyymmdd: str, end_yyyymmdd: str) ->
 
     # --- 5. 仓单 ---
     try:
-        wr = panda_data.get_future_warehouse_receipt(symbol=[variety],
+        wr = panda_data.get_future_warehouse_receipt(underlying_symbol=[variety],
                                                      start_date=start_yyyymmdd,
                                                      end_date=end_yyyymmdd)
         if wr is not None and not wr.empty:
@@ -155,7 +175,7 @@ def fetch_future_mark_price(ts_code: str, date_str: str) -> float | None:
         from asset_classifier import classify
         info = classify(ts_code)
         if info.variety:
-            dom = panda_data.get_future_dominant(symbol=[info.variety],
+            dom = panda_data.get_future_dominant(underlying_symbol=[info.variety],
                                                  start_date=yyyymmdd, end_date=yyyymmdd)
             if dom is not None and not dom.empty and "close" in dom.columns:
                 return float(dom["close"].iloc[-1])

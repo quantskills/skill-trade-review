@@ -14,7 +14,7 @@ from review import run
 BASE_CFG = {"llm": {"enabled": False}, "disable_context_fetch": True}
 
 
-def test_preflight_requires_credentials_by_default() -> None:
+def test_preflight_requires_panda_by_default() -> None:
     old_env = {k: os.environ.get(k) for k in (
         "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY",
         "PANDA_DATA_USERNAME", "PANDA_DATA_PASSWORD",
@@ -30,11 +30,10 @@ def test_preflight_requires_credentials_by_default() -> None:
             run(trades, mode="daily")
         except EnvironmentError as exc:
             msg = str(exc)
-            assert "ANTHROPIC_BASE_URL" in msg
-            assert "ANTHROPIC_API_KEY" in msg
+            assert "USER_ACTION_REQUIRED" in msg
             assert "PANDA_DATA_USERNAME" in msg
             assert "PANDA_DATA_PASSWORD" in msg
-            print("[OK] preflight_requires_credentials_by_default")
+            print("[OK] preflight_requires_panda_by_default")
             return
         raise AssertionError("默认运行缺凭据时必须提示配置")
     finally:
@@ -66,6 +65,36 @@ def test_preflight_accepts_config_credentials() -> None:
         parsed = json.loads(out["result_json"].iloc[0])
         assert parsed["summary"]["n_closed"] == 1
         print("[OK] preflight_accepts_config_credentials")
+    finally:
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_preflight_requires_panda_when_context_needed() -> None:
+    old_env = {k: os.environ.get(k) for k in (
+        "PANDA_DATA_USERNAME", "PANDA_DATA_PASSWORD",
+    )}
+    for key in old_env:
+        os.environ.pop(key, None)
+    trades = [
+        {"trade_date": "2026-06-04", "ts_code": "RB2610.SHFE", "direction": "long",
+         "status": "closed", "volume": 5, "realized_pnl": 1200.0},
+    ]
+    cfg = {"llm": {"enabled": False}}
+    try:
+        try:
+            run(trades, mode="daily", config=cfg)
+        except EnvironmentError as exc:
+            msg = str(exc)
+            assert "USER_ACTION_REQUIRED" in msg
+            assert "PANDA_DATA_USERNAME" in msg
+            assert "PANDA_DATA_PASSWORD" in msg
+            print("[OK] preflight_requires_panda_when_context_needed")
+            return
+        raise AssertionError("需要 panda_data 时缺凭据必须立即中止")
     finally:
         for key, value in old_env.items():
             if value is None:
@@ -187,6 +216,31 @@ def test_llm_disabled() -> None:
     # market_review / trade_reviews 即使 LLM 关闭也必须输出结构
     assert "market_review" in parsed and "trade_reviews" in parsed
     print("[OK] llm_disabled")
+
+
+def test_host_model_mode_by_default() -> None:
+    trades = [
+        {"trade_date": "2026-06-04", "ts_code": "RB2610.SHFE", "direction": "long",
+         "status": "closed", "volume": 5, "realized_pnl": 1200.0},
+        {"trade_date": "2026-06-04", "ts_code": "RB2610.SHFE", "direction": "short",
+         "status": "closed", "volume": 5, "realized_pnl": -700.0},
+    ]
+    out = run(trades, mode="daily", config={"disable_context_fetch": True})
+    parsed = json.loads(out["result_json"].iloc[0])
+    assert parsed["llm_meta"]["enabled"] is False
+    assert parsed["llm_meta"]["skipped_reason"] == "host_model_expected"
+    assert parsed["host_handoff"]["llm_requested"] is True
+    assert parsed["host_handoff"]["external_llm_used"] is False
+    contract = parsed["host_fill_contract"]
+    assert contract["report_structure_must_not_change"] is True
+    assert contract["host_model_must_fill_in_place"] is True
+    assert contract["host_model_must_not_append_separate_summary"] is True
+    assert "market_review_section" in contract["llm_slots"]
+    assert "per_trade_comments" in contract["llm_slots"]
+    assert "decision_section" in contract["llm_slots"]
+    assert "strategy_fit_section" in contract["llm_slots"]
+    assert parsed["narrative_md"]
+    print("[OK] host_model_mode_by_default")
 
 
 def test_real_panda_data() -> None:
@@ -396,7 +450,7 @@ def register_strategy():
         os.unlink(p)
 
 
-def test_strategy_review_disabled_when_no_path() -> None:
+def _deprecated_removed_strategy_review_test() -> None:
     """没传 strategy_path 时，result_json 中 strategy_review 应为 None，输出与现状一致。"""
     trades = [
         {"trade_date": "2026-06-04", "ts_code": "RB2610.SHFE", "direction": "long",
@@ -413,18 +467,19 @@ def test_strategy_review_disabled_when_no_path() -> None:
 
 
 if __name__ == "__main__":
-    test_preflight_requires_credentials_by_default()
+    test_preflight_requires_panda_by_default()
     test_preflight_accepts_config_credentials()
+    test_preflight_requires_panda_when_context_needed()
     test_stock_only()
     test_future_only()
     test_mixed()
     test_empty_input()
     test_missing_field()
     test_llm_disabled()
+    test_host_model_mode_by_default()
     test_with_mock_context()
     test_strategy_doc_yaml()
     test_strategy_doc_markdown()
     test_strategy_doc_python()
-    test_strategy_review_disabled_when_no_path()
     test_real_panda_data()
     print("=== 全部测试通过 ===")

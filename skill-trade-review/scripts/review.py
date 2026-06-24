@@ -18,17 +18,23 @@ from pnl_normalizer import validate_and_split, fill_missing_mark_and_unrealized
 from context_loader import load_context, make_mark_price_fetcher
 from patterns import detect_patterns
 from advice import generate_advice
-from llm_layer import call_llm
 from market_review import build_market_review
 from per_trade_review import review_all_trades
 from strategy_doc import load_strategy
-from strategy_review import call_strategy_review
 
 BUILD_ID = "R00"
 BUILD_NAME = "交易复盘"
 
 
 # --- preflight ---------------------------------------------------
+
+class MissingConfigurationError(EnvironmentError):
+    """Raised when required runtime configuration is missing."""
+
+
+class ExternalServiceInitError(EnvironmentError):
+    """Raised when configured external services cannot initialize."""
+
 
 def _filled(value: Any) -> bool:
     return value is not None and str(value).strip() != ""
@@ -40,32 +46,76 @@ def _llm_enabled(config: dict) -> bool:
     return bool(cfg.get("enabled", True)) and not env_disabled
 
 
-def _preflight_credentials(config: dict, context: Any = None) -> None:
-    """在正式运行前检查外部服务凭据，避免静默降级。"""
-    missing: list[str] = []
-
-    if _llm_enabled(config):
-        llm_cfg = config.get("llm", {})
-        if not _filled(llm_cfg.get("base_url") or os.getenv("ANTHROPIC_BASE_URL")):
-            missing.append("ANTHROPIC_BASE_URL")
-        if not _filled(llm_cfg.get("api_key") or os.getenv("ANTHROPIC_API_KEY")):
-            missing.append("ANTHROPIC_API_KEY")
-
-    needs_panda = (
+def _needs_panda(config: dict, context: Any = None) -> bool:
+    return (
         context is None
         and not config.get("disable_context_fetch")
         and not config.get("disable_panda_lookup")
         and config.get("fetch_mark_price") is None
     )
-    if needs_panda:
+
+
+def _build_missing_config_message(
+    missing: list[str], *, llm_required: bool, panda_required: bool
+) -> str:
+    uniq = list(dict.fromkeys(missing))
+    lines = [
+        "USER_ACTION_REQUIRED: missing required configuration for trade-review.",
+        "Stop here and configure the missing values before rerunning.",
+        "",
+        "Missing values:",
+        *[f"- {name}" for name in uniq],
+        "",
+        "Accepted configuration sources:",
+    ]
+    if llm_required:
+        lines.extend(
+            [
+                "- llm.base_url or ANTHROPIC_BASE_URL",
+                "- llm.api_key or ANTHROPIC_API_KEY",
+            ]
+        )
+    if panda_required:
+        lines.extend(
+            [
+                "- panda_data.username or PANDA_DATA_USERNAME",
+                "- panda_data.password or PANDA_DATA_PASSWORD",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "Environment variable examples:",
+            "set ANTHROPIC_BASE_URL=",
+            "set ANTHROPIC_API_KEY=",
+            "set PANDA_DATA_USERNAME=",
+            "set PANDA_DATA_PASSWORD=",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _preflight_credentials(config: dict, context: Any = None) -> None:
+    """在正式运行前检查外部服务凭据，避免静默降级。"""
+    missing: list[str] = []
+    panda_required = _needs_panda(config, context)
+
+    if panda_required:
         panda_cfg = config.get("panda_data", {})
         if not _filled(panda_cfg.get("username") or os.getenv("PANDA_DATA_USERNAME")):
             missing.append("PANDA_DATA_USERNAME")
         if not _filled(panda_cfg.get("password") or os.getenv("PANDA_DATA_PASSWORD")):
             missing.append("PANDA_DATA_PASSWORD")
 
-    if not missing:
-        return
+    if missing:
+        raise MissingConfigurationError(
+            _build_missing_config_message(
+                missing,
+                llm_required=False,
+                panda_required=panda_required,
+            )
+        )
+    return
 
     uniq = list(dict.fromkeys(missing))
     lines = [
@@ -563,8 +613,27 @@ def run(
     advice = generate_advice(patterns, trade_reviews=trade_reviews,
                              market_review=market_review)
 
-    llm_out = call_llm(summary, attribution, patterns, context,
-                       market_review, trade_reviews, advice, config)
+    llm_out = {
+        "market_narrative_md": None,
+        "market_directional_view": None,
+        "market_key_levels_used": None,
+        "market_trigger_long": None,
+        "market_trigger_short": None,
+        "trade_review_comments": None,
+        "decision_narrative_md": None,
+        "insights": None,
+        "extra_actions": None,
+        "llm_meta": {
+            "enabled": False,
+            "model": None,
+            "calls": 0,
+            "cache_hits": 0,
+            "max_calls": 0,
+            "latency_ms_total": 0,
+            "segment_status": {},
+            "skipped_reason": "host_model_expected",
+        },
+    }
 
     # ---- 策略意图层（可选，开关式） ----
     strategy_doc = None
@@ -578,13 +647,10 @@ def run(
             warnings.append(f"加载策略文件失败: {exc}")
             strategy_doc = None
 
-        if strategy_doc is not None and not strategy_doc.is_empty():
-            strategy_review_out = call_strategy_review(
-                strategy_doc, summary, attribution, market_review,
-                trade_reviews.get("summary", {}), context, config,
-            )
+        if strategy_doc is not None and strategy_doc.is_empty():
+            strategy_doc = None
             # 把策略层 decision_advice 合并入 advice（标 tag=strategy_intent）
-            if strategy_review_out and strategy_review_out.get("decision_advice"):
+            if False:
                 for a in strategy_review_out["decision_advice"]:
                     entry = {
                         "priority": a.get("priority", "medium"),
@@ -674,6 +740,49 @@ def run(
         "score": score,
         "regime_label": context.get("regime_label") if context else None,
         "llm_meta": llm_out.get("llm_meta"),
+        "host_handoff": {
+            "llm_requested": _llm_enabled(config),
+            "external_llm_used": False,
+            "external_strategy_review_used": False,
+            "recommended_next_step": "Have the host AI read result_json and generate narrative, insights, and strategy commentary.",
+        },
+        "host_fill_contract": {
+            "report_structure_must_not_change": True,
+            "llm_slots": {
+                "market_review_section": {
+                    "report_section": "二、市场行情研判",
+                    "required_fields": [
+                        "market_narrative_md",
+                        "market_directional_view",
+                        "market_key_levels_used",
+                        "market_trigger_long",
+                        "market_trigger_short",
+                    ],
+                },
+                "per_trade_comments": {
+                    "report_section": "三、逐笔交易点评",
+                    "required_fields": [
+                        "trade_review_comments",
+                    ],
+                },
+                "decision_section": {
+                    "report_section": "六、综合复盘",
+                    "required_fields": [
+                        "decision_narrative_md",
+                        "insights",
+                        "extra_actions",
+                    ],
+                },
+                "strategy_fit_section": {
+                    "report_section": "二补充：策略适配复盘",
+                    "required_fields": [
+                        "strategy_review",
+                    ],
+                },
+            },
+            "host_model_must_fill_in_place": True,
+            "host_model_must_not_append_separate_summary": True,
+        },
     }
 
     target_id = str(df["account_id"].iloc[0]) if not df.empty else "default"

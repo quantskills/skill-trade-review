@@ -18,8 +18,7 @@ set PANDA_DATA_PASSWORD=
 可选，控制 LLM 层：
 
 ```bash
-set ANTHROPIC_BASE_URL= 
-set ANTHROPIC_API_KEY= 
+宿主模型回填模式下无需单独配置外部 LLM `base_url` / `api_key`
 set REVIEW_LLM_DISABLED=1     # 等同 config.llm.enabled=False
 ```
 

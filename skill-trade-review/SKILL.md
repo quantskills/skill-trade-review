@@ -110,11 +110,12 @@ Return a one-row DataFrame aligned with the production review shape.
 
 ## LLM Rules
 
-- LLM is enabled by default and can be disabled by config or environment.
+- LLM enhancement is optional. The skill must still produce a complete rule-based review when no external LLM client is configured.
+- Prefer the host AI or current session model when the runtime supports direct model use; only use external provider credentials as an optional fallback.
 - LLM never rewrites numeric fields such as summary, attribution, patterns, advice, score, or rating.
 - LLM only reads desensitized aggregates and review summaries, not raw order-level sensitive fields.
 - If schema validation fails, the LLM section must degrade safely instead of silently corrupting output.
-- Audit logs and cache files are written under the user skill cache directory.
+- Audit logs and cache files are written under the user skill cache directory when the external LLM path is used.
 
 See [references/llm_policy.md](references/llm_policy.md).
 
@@ -130,8 +131,7 @@ flowchart LR
     F --> G["review_all_trades"]
     G --> H["detect_patterns"]
     H --> I["generate_advice"]
-    I --> J["call_llm_optional"]
-    J --> K["result_json"]
+    I --> J["result_json"]
 ```
 
 ## Scripts
@@ -146,7 +146,6 @@ flowchart LR
 | `scripts/per_trade_review.py` | per-trade review |
 | `scripts/patterns.py` | rule-based pattern detection |
 | `scripts/advice.py` | advice mapping |
-| `scripts/llm_layer.py` | LLM orchestration and audit |
 
 ## Run
 
@@ -161,6 +160,23 @@ result = run(
     config={"benchmark": "auto", "llm": {"enabled": True}},
 )
 ```
+
+Default behavior:
+
+- `run()` computes the full rule-based review package locally.
+- The host AI should read `result_json` and fill the original LLM answer slots in place.
+- The report structure must not change.
+- The host AI must not append a separate summary-style closeout in place of the original LLM sections.
+- The host AI should fill these original locations:
+
+| Original location | What the host AI must produce |
+|---|---|
+| `二、市场行情研判` | market narrative, key levels commentary, directional triggers |
+| `三、逐笔交易点评` | per-trade comments in place |
+| `六、综合复盘` | decision narrative and insights |
+| `二补充：策略适配复盘` | strategy fit analysis and decision advice |
+
+- External provider calls are optional and should be enabled explicitly, not assumed by default.
 
 ```bash
 python scripts/review.py --trades trades.csv --mode daily --date 2026-06-04
@@ -197,4 +213,3 @@ The core test set should cover:
 - [references/llm_policy.md](references/llm_policy.md)
 - [references/output_contract.md](references/output_contract.md)
 - [references/review_checklist.md](references/review_checklist.md)
-
