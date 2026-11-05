@@ -6,3 +6,7 @@ description: Review closed or open trades by normalizing records, adding market 
 # Trade Review
 
 Use the canonical implementation in [skill-trade-review/SKILL.md](skill-trade-review/SKILL.md). Its scripts, references, and tests remain in that directory.
+
+## Pandadata compatibility
+
+[Pandadata 1.0.6 compatibility](references/pandadata-compatibility.md) — exact SDK baseline, validation scope, and shared guidance for all supported agent runtimes.
